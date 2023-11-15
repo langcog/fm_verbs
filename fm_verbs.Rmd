@@ -10,13 +10,14 @@ output:
 First, load the necessary packages.
 
 ```{r}
+# uses plyr but not libraried
 library(here)
 library(tidyverse)
 library(lme4)
 library(ggthemes)
-require(plyr)
 
-# library(irr)
+
+library(binom)
 library(interactions)
 library(BayesFactor)
 
@@ -28,14 +29,27 @@ Next, load data.
 ```{r}
 data_verbs <- read_csv(here::here("fm_verbs_data.csv"))
 
-data_verbs$corpus <- as.factor(data_verbs$corpus)
-data_verbs$video <- as.factor(data_verbs$video)
-data_verbs$action.has <- as.character(data_verbs$action.has)
-data_verbs$event.start <- as.character(data_verbs$event.start)
-data_verbs$event.end <- as.character(data_verbs$event.end)
-data_verbs$VerbOnset <- as.character(data_verbs$VerbOnset)
-data_verbs$parent.exec <- as.factor(data_verbs$parent.exec)
+# data_verbs$corpus <- as.factor(data_verbs$corpus)
+# data_verbs$video <- as.factor(data_verbs$video)
+# data_verbs$action.has <- as.character(data_verbs$action.has)
+# data_verbs$event.start <- as.character(data_verbs$event.start)
+# data_verbs$event.end <- as.character(data_verbs$event.end)
+# data_verbs$VerbOnset <- as.character(data_verbs$VerbOnset)
+# data_verbs$parent.exec <- as.factor(data_verbs$parent.exec)
 ```
+Adding/releveling variables. 
+
+```{r}
+data_verbs$age_scaled<-scale(data_verbs$age_months, scale = FALSE)
+data_verbs$speech.act <- factor(data_verbs$speech.act, 
+                                labels = c("Declarative",
+                                           "Imperative", "Interrogative"))
+
+#Scale Age
+levels(data_verbs$corpus) <- c("American","Japanese")
+
+```
+
 
 # Preregistered analyses
 
@@ -51,21 +65,46 @@ ImperativesModel <- glmer(is.imperative ~ corpus * as.numeric(age_months) +
                           family = binomial)
 ```
 
-For plotting, interact plot works well here
+For plotting, interact plot works well here. Figure 4 in MS.
 
 ```{r}
-interact_plot(ImperativesModel,age_months, modx = corpus, interval = TRUE)
+ms <- data_verbs |> 
+  group_by(corpus, age_months) |>
+  summarise(n = n(), 
+            x = sum(is.imperative),
+            p = mean(is.imperative), 
+            lower = binom.bayes(x, n)$lower,
+            upper = binom.bayes(x, n)$upper)
+
+interact_plot(ImperativesModel, age_months, modx = corpus, interval = TRUE) +
+  geom_pointrange(data = ms, 
+                  aes(x = age_months, y = p, ymin = lower, 
+                      ymax = upper, group = 1), linetype = 1, 
+                  position = "dodge") + 
+  theme_few() + 
+  scale_color_solarized(name = "Corpus") +
+  scale_fill_solarized(name = "Corpus") +
+  scale_linetype(name = "Corpus") +
+  ylab("Probability of Imperative Utterance") + 
+  xlab("Age (Months)") +
+  ylim(0,1) + 
+  theme(legend.position = "bottom")
+
 #+ labs(x="Age in Months", y = "Likelihood that Utterance is Imperative") + legend("top",c("American", "Japanese"))
 ```
 
-Proportion by age group
+Proportion by age group.
 
 ```{r}
-IsImperativeProps <- plyr::ddply(data_verbs, c("corpus","age_months"), summarise,
-                    propImperative=sum(speech.act=="imperative",na.rm = TRUE)/length(speech.act))
+IsImperativeProps <- plyr::ddply(data_verbs, c("corpus","age_months"), 
+                                 summarise,
+                                 propImperative = sum(speech.act == 
+                                                        "Imperative",
+                                                      na.rm = TRUE) /
+                                   length(speech.act))
 
 #plotting proportion values too
-b<- ggplot(IsImperativeProps, aes(x = age_months, y = propImperative, color = corpus, shape = corpus)) 
+b <- ggplot(IsImperativeProps, aes(x = age_months, y = propImperative, color = corpus, shape = corpus)) 
 b + geom_point() +
   geom_smooth(method = lm,fullrange = TRUE) + 
   labs(x="Age in Months", y = "Proportion Imperative") 
@@ -77,11 +116,11 @@ Exploratory t-test
 
 exp_t <- plyr::ddply(data_verbs, c("corpus","video","age_group"), 
                      summarise, 
-                     propDeclarative=sum(speech.act=="declarative",
+                     propDeclarative=sum(speech.act=="Declarative",
                                          na.rm = TRUE)/length(speech.act), 
-                     propInterrogative=sum(speech.act=="interrogative",
+                     propInterrogative=sum(speech.act=="Interrogative",
                                            na.rm = TRUE)/length(speech.act),
-                     propImperative=sum(speech.act=="imperative", 
+                     propImperative=sum(speech.act=="Imperative", 
                                         na.rm = TRUE)/length(speech.act))
 
 t.test(propInterrogative ~ corpus, data = exp_t)
@@ -94,17 +133,39 @@ Note: who carried out the action is actually not a useful factor, because whethe
 
 
 ```{r}
-data_verbs$age_scaled<-scale(data_verbs$age_months, scale = FALSE)
-#Scale Age
-
-Actionmodel<-glmer(as.numeric(action.has) ~ corpus * age_months + as.factor(speech.act) + (1|video), data = data_verbs, family = binomial, control = glmerControl(optimizer = "bobyqa"))
+Actionmodel <- glmer(as.numeric(action.has) ~ corpus * age_months + 
+                     as.factor(speech.act) + (1|video), 
+                   data = data_verbs, 
+                   family = binomial, 
+                   control = glmerControl(optimizer = "bobyqa"))
 ```
 
 
 Plot the model
 
 ```{r}
-interact_plot(Actionmodel, age_months, modx = corpus)
+ms_interaction <- data_verbs |> 
+  group_by(corpus, age_months) |>
+  summarise(n = sum(!is.na(action.has)),
+            x = sum(action.has, na.rm=TRUE),
+            p = mean(action.has, na.rm=TRUE), 
+            lower = binom.bayes(x, n)$lower,
+            upper = binom.bayes(x, n)$upper)
+
+
+interact_plot(Actionmodel, age_months, modx = corpus, interval = TRUE) + 
+  geom_pointrange(data = ms_interaction, 
+                  aes(x = age_months, y = p, ymin = lower, 
+                      ymax = upper, group = 1), linetype = 1, 
+                  position = "dodge") + 
+  theme_few() + 
+  scale_color_solarized(name = "Corpus") +
+  scale_fill_solarized(name = "Corpus") +
+  scale_linetype(name = "Corpus") +
+  ylab("Probability of Event Occurrence") + 
+  xlab("Age (Months)") +
+  ylim(0,1) + 
+  theme(legend.position = "bottom")
 ```
 
 Setup for plotting means
@@ -112,8 +173,8 @@ Setup for plotting means
 ```{r}
 ActionProps <- plyr::ddply(data_verbs, c("corpus","age_group", "video"), 
                            summarise,
-                     actions = sum(as.numeric(action.has), na.rm = TRUE), 
-                     propactions = actions/length(action.has))
+                           actions = sum(as.numeric(action.has), na.rm = TRUE), 
+                           propactions = actions/length(action.has))
 
 ActionProps2 <- plyr::ddply(ActionProps,c("corpus","age_group"), 
                             summarise, 
@@ -136,6 +197,18 @@ ggplot(ActionProps2, aes(corpus, meanpropactions,
   labs(x="Corpus",
        y="Mean Proportion Co-Occurring Events", fill = "Age Group") +  scale_x_discrete(labels = c("American", "Japanese"))
 ```
+
+Figure 1 in Ms. 
+```{r}
+cat_plot(Actionmodel, corpus, modx = speech.act, geom = "bar") + 
+  theme_few() + 
+  scale_color_solarized(name = "Speech Act") +
+  scale_fill_solarized(name = "Speech Act") +
+  ylab("Probability of Event Occurrence") + 
+  xlab("Corpus") +
+  ylim(0,1)
+```
+
 
 > We will conduct a mixed-effects linear model examining the onset time of events that were carried out using corpus, age, who conducted the action, and utterance type as fixed factors, and subject as a random factor. 
 
@@ -160,9 +233,9 @@ Fit model.
 
 ```{r}
 Onsetmodel <- lmer(relative_onset ~ corpus * age_months * 
-                   as.factor(parent.exec) + 
-                   speech.act + (1|video), 
-                 data = data_actions)
+                     as.factor(parent.exec) + 
+                     speech.act + (1|video), 
+                   data = data_actions)
 ```
 
 # Summaries
@@ -182,7 +255,8 @@ summary(Actionmodel)
 Onsets.
 
 ```{r}
-summary(Onsetmodel)
+coef(summary(Onsetmodel)) |>
+  knitr::kable(digits = 2)
 ```
 
 ```{r}
@@ -201,56 +275,80 @@ summary(Onsetmodel)
 Onset Model with impending vs. completed
 
 ```{r}
-is_impending<-as.numeric(data_actions$VerbOnset<data_actions$action_onset_seconds)
-data_actions2<-cbind(data_actions,is_impending)
+data_actions$is_impending <- as.numeric(data_actions$VerbOnset < 
+                             data_actions$action_onset_seconds)
 
-OnsetmodelIMP<-glmer(is_impending ~ corpus * speech.act + (1|video), data = data_actions2, family = binomial)
-OnsetProps <- ddply(data_actions2, c("corpus", "video"), summarise,
-                    impending_actions=sum(is_impending, na.rm = TRUE), propimpending = impending_actions/length(is_impending), sem = sd(is_impending)/sqrt(length(is_impending)))
+OnsetmodelIMP <- glmer(is_impending ~ corpus * speech.act + (1|video), 
+                       data = data_actions, family = binomial)
 
-OnsetProps2 <- ddply(data_actions2, c("corpus"), summarise,
-                    impending_actions=sum(is_impending, na.rm = TRUE), propimpending = impending_actions/length(is_impending), sem = sd(is_impending)/sqrt(length(is_impending)))
+OnsetProps <- plyr::ddply(data_actions, c("corpus", "video"), summarise,
+                    impending_actions = sum(is_impending, na.rm = TRUE), 
+                    propimpending = impending_actions/length(is_impending), 
+                    sem = sd(is_impending)/sqrt(length(is_impending)))
 
-OnsetProps2<-transform(OnsetProps2, lower = propimpending-sem, upper = propimpending+sem)
+OnsetProps2 <- plyr::ddply(data_actions, c("corpus"), 
+                           summarise,
+                           impending_actions=sum(is_impending, na.rm = TRUE), 
+                           propimpending = impending_actions / 
+                             length(is_impending), 
+                           sem = sd(is_impending) / 
+                             sqrt(length(is_impending)))
+
+OnsetProps2 <- transform(OnsetProps2, 
+                         lower = propimpending-sem, upper = propimpending+sem)
 ```
 
 This also does not get used
 
 ```{r}
-impend_plot<-ggplot(OnsetProps2, aes(corpus, propimpending, fill = corpus)) + 
+impend_plot <- ggplot(OnsetProps2, aes(corpus, propimpending, fill = corpus)) + 
   geom_bar(stat = "identity", color = "black") + 
   geom_errorbar(aes(ymin=lower, ymax=upper),width = .1) +
   labs(x="Corpus",
        y="Proportion of Impending Actions") +  scale_x_discrete(labels = c("American", "Japanese"))
 ```
 
-Histogram for variability
+Histogram for variability. Fig 3 in ms. 
 
 ```{r}
-h <- ggplot(data_actions, aes(relative_event))
-h + geom_histogram(aes(color =factor(corpus), 
-                       fill=factor(corpus)), alpha=0.8) + 
-  labs(#title="Relative Action Onset Time by Corpus", 
-       #subtitle="Relative to Verb Utterance",
-       x="Event Onset (seconds) Relative to Verb Onset", 
+ggplot(data_actions, aes(relative_event)) + 
+  geom_histogram(aes(fill=factor(corpus)), alpha=0.8, position= "dodge") + 
+  labs(x="Event Onset Relative to Verb Onset (seconds)", 
        y = "Frequency of Event Occurrence",
        fill="Corpus") + xlim(c(-20, 15)) +  
-  scale_fill_discrete(name = "Corpus", labels = c("American", "Japanese"))
+  scale_fill_solarized(name = "Corpus", labels = c("American", "Japanese")) + 
+  theme_few() 
 ```
 
 # BayesFactor Exploratory Analysis
 
 ```{r}
+
+data_actions_nona <- filter(data_actions, 
+                            !is.na(parent.exec) & 
+                              !is.na(speech.act))
+
 BayesOnsetModel <- generalTestBF(relative_onset ~ corpus * age_months * 
                                    parent.exec + speech.act + video, 
                                  whichRandom = "video", 
                                  neverExclude = "video", 
-                                 data = filter(data_actions2, 
-                                            !is.na(parent.exec) & 
-                                              !is.na(speech.act)), 
-                                 whichModels = "bottom")
+                                 data = data_actions_nona, 
+                                 whichModels = "top")
+
+# plot(BayesOnsetModel)
+bfs <- as_tibble(BayesOnsetModel) |>
+  mutate(contrast = c("Omit age_months:corpus:parent.exec","Omit age_months:parent.exec","Omit corpus:parent.exec","Omit age_months:corpus","Omit speech.act","Omit parent.exec","Omit age_months","Omit corpus"))
 
 plot(BayesOnsetModel)
+
+ggplot(bfs, aes(x = contrast, y = bf)) + 
+  geom_bar(stat = "identity") + 
+  scale_y_log10() + 
+  coord_flip() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+  ylab("Bayes Factor favoring simpler model") + 
+  xlab("")
+  
 
 ```
 
