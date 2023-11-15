@@ -82,9 +82,9 @@ interact_plot(ImperativesModel, age_months, modx = corpus, interval = TRUE) +
                       ymax = upper, group = 1), linetype = 1, 
                   position = "dodge") + 
   theme_few() + 
-  scale_color_solarized(name = "Corpus") +
-  scale_fill_solarized(name = "Corpus") +
-  scale_linetype(name = "Corpus") +
+  scale_color_solarized(name = "Corpus", labels = c("American", "Japanese")) +
+  scale_fill_solarized(name = "Corpus", labels = c("American", "Japanese")) +
+  scale_linetype(name = "Corpus", labels = c("American", "Japanese")) +
   ylab("Probability of Imperative Utterance") + 
   xlab("Age (Months)") +
   ylim(0,1) + 
@@ -326,7 +326,8 @@ ggplot(data_actions, aes(relative_event)) +
 
 data_actions_nona <- filter(data_actions, 
                             !is.na(parent.exec) & 
-                              !is.na(speech.act))
+                              !is.na(speech.act)) |>
+  mutate(video = factor(video))
 
 BayesOnsetModel <- generalTestBF(relative_onset ~ corpus * age_months * 
                                    parent.exec + speech.act + video, 
@@ -339,7 +340,7 @@ BayesOnsetModel <- generalTestBF(relative_onset ~ corpus * age_months *
 bfs <- as_tibble(BayesOnsetModel) |>
   mutate(contrast = c("Omit age_months:corpus:parent.exec","Omit age_months:parent.exec","Omit corpus:parent.exec","Omit age_months:corpus","Omit speech.act","Omit parent.exec","Omit age_months","Omit corpus"))
 
-plot(BayesOnsetModel)
+# plot(BayesOnsetModel)
 
 ggplot(bfs, aes(x = contrast, y = bf)) + 
   geom_bar(stat = "identity") + 
